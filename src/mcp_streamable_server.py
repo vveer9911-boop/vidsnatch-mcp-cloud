@@ -498,22 +498,15 @@ async def test_trim_endpoint(request: Request) -> Response:
 # =====================================================================
 
 def create_app() -> Starlette:
-    """
-    Create the combined Starlette application with both MCP and custom routes.
-    """
-    # Get the MCP ASGI app
-    mcp_app = mcp.streamable_http_app()
-
-    # Create the main app with custom routes + mount MCP
-    routes = [
-        Route("/", root_endpoint),
-        Route("/health", health_endpoint),
-        Route("/test", test_trim_endpoint),
-        Route("/download/{filename}", download_endpoint),
-        Mount("/", app=mcp_app),
-    ]
-
-    app = Starlette(routes=routes)
+    # mcp.streamable_http_app() returns a Starlette app natively handling /mcp
+    app = mcp.streamable_http_app()
+    
+    # Inject our custom routes directly into the app so we don't mess up the MCP routing
+    app.routes.append(Route("/", root_endpoint))
+    app.routes.append(Route("/health", health_endpoint))
+    app.routes.append(Route("/test", test_trim_endpoint))
+    app.routes.append(Route("/download/{filename}", download_endpoint))
+    
     return app
 
 
