@@ -175,14 +175,14 @@ class YouTubeDownloader:
         with self._discard_partials_on_failure(output_path):
             return self._download_video_impl(url, output_path, quality)
 
-    
     def _download_video_impl(self, url: str, output_path: str, quality: str) -> str:
         self.logger.info(f"Downloading video from {url} using yt-dlp...")
         import subprocess
         output_file = os.path.join(output_path, "video.mp4")
         subprocess.run(["yt-dlp", "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best", "-o", output_file, url], check=True)
         return output_file
-def download_audio(self, url: str, output_path: str = "./downloads", quality: str = "highest") -> str:
+
+    def download_audio(self, url: str, output_path: str = "./downloads", quality: str = "highest") -> str:
         """Download audio from a YouTube URL and convert to MP3."""
         self._create_output_dir(output_path)
         self.logger.info(f"Downloading audio from: {url}")
