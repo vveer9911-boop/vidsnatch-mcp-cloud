@@ -497,7 +497,7 @@ def create_app() -> Starlette:
         Route("/", root_endpoint),
         Route("/health", health_endpoint),
         Route("/download/{filename}", download_endpoint),
-        Mount("/mcp", app=mcp_app),
+        Mount("/", app=mcp_app),
     ]
 
     app = Starlette(routes=routes)
