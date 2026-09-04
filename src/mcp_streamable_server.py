@@ -255,8 +255,16 @@ def trim_and_serve(
 
         logger.info(f"trim_and_serve: Trimming {url} [{start_time} -> {end_time}] as {filename}")
 
-        # Use VidSnatch's trim_video with custom output filename
-        result_json = tools.trim_video(url, start_time, end_time, quality, filename)
+        def time_to_seconds(t):
+            if isinstance(t, (int, float)): return float(t)
+            parts = str(t).split(':')
+            if len(parts) == 3: return float(parts[0])*3600 + float(parts[1])*60 + float(parts[2])
+            elif len(parts) == 2: return float(parts[0])*60 + float(parts[1])
+            else: return float(parts[0])
+
+        s_sec = time_to_seconds(start_time)
+        e_sec = time_to_seconds(end_time)
+        result_json = tools.download_video_segment(url, s_sec, e_sec, quality)
         result = json.loads(result_json)
 
         if result.get("status") != "success":
