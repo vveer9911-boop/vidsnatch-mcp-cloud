@@ -1,0 +1,41 @@
+# VidSnatch MCP Cloud Server - Optimized for Render.com Free Tier
+# Streamable HTTP transport for ChatGPT Pro / Antigravity MCP integration
+
+FROM python:3.11-slim
+
+# Install system dependencies (ffmpeg is critical for video trimming)
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV DOWNLOAD_DIR=/tmp/vidsnatch
+
+# Set working directory
+WORKDIR /app
+
+# Copy dependency files first (Docker cache optimization)
+COPY requirements.txt pyproject.toml ./
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir 'mcp[cli]>=1.12.0,<2.0.0' starlette uvicorn[standard]
+
+# Copy application source code
+COPY src/ ./src/
+
+# Create temporary download directory
+RUN mkdir -p /tmp/vidsnatch
+
+# Render uses PORT env var (default 10000)
+EXPOSE 10000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:${PORT:-10000}/health || exit 1
+
+# Start the Streamable HTTP MCP server
+CMD ["python", "-c", "from src.mcp_streamable_server import main; main()"]

@@ -1,0 +1,16 @@
+# Render Blueprint - VidSnatch MCP Cloud Server
+# https://render.com/docs/blueprint-spec
+
+services:
+  - type: web
+    name: vidsnatch-mcp
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile.render
+    envVars:
+      - key: DOWNLOAD_DIR
+        value: /tmp/vidsnatch
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: BASE_URL
+        value: https://vidsnatch-mcp.onrender.com
