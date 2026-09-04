@@ -176,11 +176,54 @@ class YouTubeDownloader:
             return self._download_video_impl(url, output_path, quality)
 
     def _download_video_impl(self, url: str, output_path: str, quality: str) -> str:
-        self.logger.info(f"Downloading video from {url} using yt-dlp...")
-        import subprocess
-        output_file = os.path.join(output_path, "video.mp4")
-        subprocess.run(["yt-dlp", "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best", "-o", output_file, url], check=True)
-        return output_file
+        self.logger.info(f"Downloading video from: {url}")
+        yt = self._get_youtube_object(url)
+
+        self.logger.info(f"Title: {yt.title}")
+        self.logger.info(f"Author: {yt.author}")
+        self.logger.info(f"Duration: {yt.length} seconds")
+        self.logger.info(f"Views: {yt.views}")
+
+        # For specific low-res, try progressive first
+        is_high_quality = quality == 'highest' or any(q in quality for q in ['1080p', '1440p', '2160p', '4320p'])
+        if not is_high_quality:
+            stream = yt.streams.filter(res=quality, progressive=True).first()
+            if stream:
+                self.logger.info(f"Downloading video in {quality} quality (progressive)...")
+                return stream.download(output_path=output_path)
+
+        # Handle adaptive streams for high quality
+        self.logger.info(f"Searching for {quality} quality video stream (adaptive)...")
+        video_stream = yt.streams.filter(adaptive=True, file_extension='mp4').order_by('resolution').desc().first() if quality == 'highest' else yt.streams.filter(res=quality, adaptive=True, file_extension='mp4').first()
+
+        if not video_stream:
+            self.logger.warning(f"Could not find adaptive stream for {quality}, falling back to highest resolution progressive stream.")
+            video_stream = yt.streams.get_highest_resolution()
+            if not video_stream:
+                raise ValueError("No downloadable video streams found.")
+            self.logger.info(f"Downloading video in {video_stream.resolution} quality...")
+            return video_stream.download(output_path=output_path)
+
+        # If the selected stream is progressive, no merge is needed
+        if video_stream.is_progressive:
+            self.logger.info(f"Downloading video in {video_stream.resolution} quality (progressive)...")
+            return video_stream.download(output_path=output_path)
+
+        audio_stream = yt.streams.get_audio_only()
+        if not audio_stream:
+            raise ValueError("No audio stream found to merge.")
+
+        self.logger.info(f"Downloading video: {video_stream.resolution} ({video_stream.filesize / 1e6:.2f}MB)")
+        video_filepath = video_stream.download(output_path=output_path, filename_prefix="video_")
+
+        self.logger.info(f"Downloading audio: {audio_stream.abr} ({audio_stream.filesize / 1e6:.2f}MB)")
+        audio_filepath = audio_stream.download(output_path=output_path, filename_prefix="audio_")
+
+        final_filename = Path(video_filepath).name.replace("video_", "")
+        output_filepath = str(Path(output_path) / final_filename)
+
+        self._merge_files(video_filepath, audio_filepath, output_filepath)
+        return output_filepath
 
     def download_audio(self, url: str, output_path: str = "./downloads", quality: str = "highest") -> str:
         """Download audio from a YouTube URL and convert to MP3."""
@@ -401,94 +444,32 @@ class YouTubeDownloader:
         secs = int(seconds % 60)
         return f"{hours:02d}:{minutes:02d}:{secs:02d}"
 
-    def download_video_segment(self, url: str, start_time: float, end_time: float, 
-                             output_path: str = "./downloads", quality: str = "highest") -> str:
-        """Download and trim a specific segment of a video."""
+    def download_video_segment(
+        self,
+        url: str,
+        start_time: float,
+        end_time: float,
+        output_path: str = "./downloads",
+        quality: str = "highest"
+    ) -> str:
         self._create_output_dir(output_path)
-        self.logger.info(f"Downloading video segment from {start_time}s to {end_time}s")
-        
-        # Validate timestamps
-        if start_time >= end_time:
-            raise ValueError("Start time must be less than end time")
-        if start_time < 0:
-            raise ValueError("Start time cannot be negative")
+        self.logger.info(f"Downloading video segment using yt-dlp: {url} [{start_time}s to {end_time}s]")
+        import subprocess
+        segment_filepath = os.path.join(output_path, "Segment1-yt.mp4")
+        if os.path.exists(segment_filepath):
+            os.remove(segment_filepath)
             
-        # Get video info first to validate duration
-        yt = self._get_youtube_object(url)
-        video_duration = yt.length
-        
-        if end_time > video_duration:
-            self.logger.warning(f"Warning: End time ({end_time}s) exceeds video duration ({video_duration}s). Using video duration.")
-            end_time = video_duration
-            
-        self.logger.info(f"Video duration: {video_duration}s, trimming from {start_time}s to {end_time}s")
-        
-        # Create temporary directory for full video download
-        with tempfile.TemporaryDirectory() as temp_dir:
-            # Download full video first
-            self.logger.info("Downloading full video for trimming...")
-            full_video_path = self.download_video(url, temp_dir, quality)
-            
-            # Create output filename with segment info
-            safe_title = re.sub(r'[^\w\s-]', '', yt.title).strip()
-            safe_title = re.sub(r'[-\s]+', '-', safe_title)
-            
-            start_str = self._format_timestamp(start_time).replace(':', '-')
-            end_str = self._format_timestamp(end_time).replace(':', '-')
-            segment_filename = f"{safe_title}_segment_{start_str}_to_{end_str}.mp4"
-            segment_filepath = os.path.join(output_path, segment_filename)
-            
-            # Format timestamps for FFmpeg
-            start_timestamp = self._format_timestamp(start_time)
-            duration = end_time - start_time
-            duration_timestamp = self._format_timestamp(duration)
-            
-            self.logger.info(f"Trimming video segment: {start_timestamp} for {duration_timestamp}")
-            
-            try:
-                # Use FFmpeg with proper video trimming - seek before input for accuracy
-                subprocess.run([
-                    "ffmpeg",
-                    "-y",  # Overwrite output file if it exists
-                    "-ss", start_timestamp,  # Seek to start time before input (more accurate)
-                    "-i", full_video_path,
-                    "-t", duration_timestamp,  # Duration to extract
-                    "-c:v", "libx264",  # Re-encode video to ensure compatibility
-                    "-c:a", "aac",  # Re-encode audio to ensure compatibility
-                    "-preset", "fast",  # Faster encoding
-                    "-crf", "23",  # Good quality/size balance
-                    "-avoid_negative_ts", "make_zero",  # Handle timestamp issues
-                    segment_filepath
-                ], check=True, capture_output=True, text=True)
-                
-                self.logger.info(f"Video segment created successfully: {segment_filepath}")
-                return segment_filepath
-                
-            except subprocess.CalledProcessError as e:
-                self.logger.error(f"FFmpeg error during trimming: {e.stderr}")
-                # Fallback with stream copy if re-encoding fails
-                self.logger.info("Retrying with stream copy...")
-                try:
-                    subprocess.run([
-                        "ffmpeg",
-                        "-y",
-                        "-i", full_video_path,
-                        "-ss", start_timestamp,
-                        "-t", duration_timestamp,
-                        "-c", "copy",
-                        "-avoid_negative_ts", "make_zero",
-                        segment_filepath
-                    ], check=True, capture_output=True, text=True)
-                    
-                    self.logger.info(f"Video segment created with stream copy: {segment_filepath}")
-                    return segment_filepath
-                    
-                except subprocess.CalledProcessError as e2:
-                    self.logger.error(f"FFmpeg stream copy also failed: {e2.stderr}")
-                    raise IOError(f"Failed to trim video segment: {e2.stderr}")
-            except FileNotFoundError:
-                self.logger.error("FFmpeg is required for video trimming. Please install FFmpeg and ensure it's in your system PATH.")
-                raise IOError("FFmpeg is required for video trimming. Please install FFmpeg and ensure it's in your system PATH.")
+        cmd = [
+            "yt-dlp",
+            "--download-sections", f"*{start_time}-{end_time}",
+            "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+            "-o", segment_filepath,
+            "--force-overwrites",
+            url
+        ]
+        self.logger.info(f"Running command: {' '.join(cmd)}")
+        subprocess.run(cmd, check=True)
+        return segment_filepath
 
     def stitch_videos(
         self,
