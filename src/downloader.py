@@ -457,14 +457,14 @@ class YouTubeDownloader:
         import subprocess
         segment_filepath = os.path.join(output_path, "Segment1-yt.mp4")
         if os.path.exists(segment_filepath):
-            os.remove(segment_filepath)
+            try: os.remove(segment_filepath)
+            except Exception: pass
             
         cmd = [
             "yt-dlp",
             "--download-sections", f"*{start_time}-{end_time}",
-            "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+            "-f", "mp4/best",
             "-o", segment_filepath,
-            "--force-overwrites",
             url
         ]
         self.logger.info(f"Running command: {' '.join(cmd)}")
