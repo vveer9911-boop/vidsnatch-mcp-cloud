@@ -481,6 +481,18 @@ def cleanup_old_files():
             logger.error(f"Cleanup thread error: {e}")
 
 
+async def test_trim_endpoint(request: Request) -> Response:
+    """Test endpoint to trigger trim."""
+    url = request.query_params.get("url")
+    start = request.query_params.get("start")
+    end = request.query_params.get("end")
+    if not url: return JSONResponse({"error": "missing url"})
+    import asyncio
+    loop = asyncio.get_event_loop()
+    # trim_and_serve is synchronous in our code
+    result_json = await loop.run_in_executor(None, trim_and_serve, url, start, end, 1, "highest")
+    return JSONResponse(json.loads(result_json))
+
 # =====================================================================
 # APP ASSEMBLY & ENTRY POINT
 # =====================================================================
@@ -496,6 +508,7 @@ def create_app() -> Starlette:
     routes = [
         Route("/", root_endpoint),
         Route("/health", health_endpoint),
+        Route("/test", test_trim_endpoint),
         Route("/download/{filename}", download_endpoint),
         Mount("/", app=mcp_app),
     ]
